@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Master</title>
+    <!-- Hubungkan file CSS -->
+ <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🧩 Sudoku Master</h1>
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <span class="label">Kesulitan:</span>
+                    <span id="display-diff" class="value">Mudah</span>
+                </div>
+                <div class="stat-item">
+                    <span class="label">Waktu:</span>
+                    <span id="timer" class="value">00:00</span>
+                </div>
+                <div class="stat-item">
+                    <span class="label">Kesalahan:</span>
+                    <span id="mistakes" class="value">0 / 3</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Kontrol Game -->
+        <div class="control-panel">
+            <div class="select-group">
+                <label for="difficulty-select">Pilih Tingkat Kesulitan:</label>
+                <select id="difficulty-select">
+                    <option value="very-easy">Sangat Mudah (Pemula)</option>
+                    <option value="easy" selected>Mudah</option>
+                    <option value="medium">Sedang</option>
+                    <option value="hard">Sulit</option>
+                    <option value="expert">Pakar (Expert)</option>
+                    <option value="evil">Extreme (Evil)</option>
+                </select>
+            </div>
+            <div class="action-buttons">
+                <button id="btn-new-game" class="btn primary">🎮 Game Baru</button>
+                <button id="btn-restart" class="btn secondary">🔄 Reset</button>
+            </div>
+        </div>
+
+        <!-- Papan Sudoku -->
+        <main class="board-container">
+            <div id="sudoku-board" class="sudoku-board"></div>
+        </main>
+
+        <!-- Papan Tombol Angka & Fitur -->
+        <div class="tools-panel">
+            <div class="number-pad">
+                <button class="num-btn" data-num="1">1</button>
+                <button class="num-btn" data-num="2">2</button>
+                <button class="num-btn" data-num="3">3</button>
+                <button class="num-btn" data-num="4">4</button>
+                <button class="num-btn" data-num="5">5</button>
+                <button class="num-btn" data-num="6">6</button>
+                <button class="num-btn" data-num="7">7</button>
+                <button class="num-btn" data-num="8">8</button>
+                <button class="num-btn" data-num="9">9</button>
+                <button class="num-btn clear-btn" data-num="0">Hapus</button>
+            </div>
+
+            <div class="utility-pad">
+                <button id="btn-notes" class="util-btn">✏️ Catatan: <span id="note-status">OFF</span></button>
+                <button id="btn-hint" class="util-btn">💡 Petunjuk</button>
+                <button id="btn-undo" class="util-btn">↩️ Undo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Kemenangan -->
+    <div id="win-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>🎉 Luar Biasa!</h2>
+            <p>Kamu berhasil menyelesaikan puzzle Sudoku ini dengan gemilang!</p>
+            <div class="win-stats">
+                <p>Waktu Penyelesaian: <strong id="win-time">00:00</strong></p>
+                <p>Total Kesalahan: <strong id="win-mistakes">0</strong></p>
+            </div>
+            <button id="btn-play-again" class="btn primary">Main Lagi</button>
+        </div>
+    </div>
+<script>
+// --- LOGIKA SUDOKU MASTER ---
+const DIFFICULTY_LEVELS = {
+    'very-easy': 70,
+    'easy': 60,
+    'medium': 50,
+    'hard': 40,
+    'expert': 35,
+    'evil': 20
+};
+
+let solutionGrid = Array(9).fill(0).map(() => Array(9).fill(0));
+let puzzleGrid = Array(9).fill(0).map(() => Array(9).fill(0));
+let userGrid = Array(9).fill(0).map(() => Array(9).fill(0));
+let notesGrid = Array(9).fill(0).map(() => Array(9).fill(() => Set()));
+
+let selectedCell = null;
+let isNoteMode = false;
+let mistakes = 0;
+let timerSeconds = 0;
+let timerInterval = null;
+let history = [];
+
+// Inisialisasi Game saat DOM siap
+document.addEventListener('DOMContentLoaded', () => {
+    createBoardUI();
+    setupEventListeners();
+    startNewGame();
+});
+
+function createBoardUI() {
+    const board = document.getElementById('sudoku-board');
+    board.innerHTML = '';
+    for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            cell.dataset.row = r;
+            cell.dataset.col = c;
+            
+            // Container catatan kecil 3x3
+            const notesContainer = document.createElement('div');
+            notesContainer.classList.add('cell-notes');
+            for (let n = 1; n <= 9; n++) {
+                const noteSpan = document.createElement('span');
+                noteSpan.dataset.note = n;
+                notesContainer.appendChild(noteSpan);
+            }
+            cell.appendChild(notesContainer);
+
+            cell.addEventListener('click', () => selectCell(r, c));
+            board.appendChild(cell);
+        }
+    }
+}
+
+function setupEventListeners() {
+    document.getElementById('btn-new-game').addEventListener('click', startNewGame);
+    document.getElementById('btn-restart').addEventListener('click', restartGame);
+    document.getElementById('btn-notes').addEventListener('click', toggleNoteMode);
+    document.getElementById('btn-hint').addEventListener('click', giveHint);
+    document.getElementById('btn-undo').addEventListener('click', undoMove);
+    document.getElementById('btn-play-again').addEventListener('click', startNewGame);
+    
+    document.getElementById('difficulty-select').addEventListener('change', (e) => {
+        document.getElementById('display-diff').textContent = e.target.options[e.target.selectedIndex].text.split(' ')[0];
+        startNewGame();
+    });
+
+    // Tombol Angka Pad
+    document.querySelectorAll('.num-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const num = parseInt(btn.dataset.num);
+            handleInput(num);
+        });
+    });
+
+    // Keyboard support
+    document.addEventListener('keydown', (e) => {
+        if (!selectedCell) return;
+        const [r, c] = selectedCell;
+        if (e.key >= '1' && e.key <= '9') {
+            handleInput(parseInt(e.key));
+        } else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+            handleInput(0);
+        } else if (e.key === 'ArrowUp' && r > 0) selectCell(r - 1, c);
+        else if (e.key === 'ArrowDown' && r < 8) selectCell(r + 1, c);
+        else if (e.key === 'ArrowLeft' && c > 0) selectCell(r, c - 1);
+        else if (e.key === 'ArrowRight' && c < 8) selectCell(r, c + 1);
+    });
+}
+
+function startNewGame() {
+    const diffKey = document.getElementById('difficulty-select').value;
+    const clues = DIFFICULTY_LEVELS[diffKey] || 30;
+    
+    generateSudoku();
+    carveKills(clues);
+    
+    userGrid = puzzleGrid.map(row => [...row]);
+    notesGrid = Array(9).fill(0).map(() => Array(9).fill(0).map(() => new Set()));
+    history = [];
+    mistakes = 0;
+    updateMistakesDisplay();
+    
+    resetTimer();
+    startTimer();
+    
+    selectedCell = null;
+    document.getElementById('win-modal').classList.add('hidden');
+    renderBoard();
+}
+
+function restartGame() {
+    userGrid = puzzleGrid.map(row => [...row]);
+    notesGrid = Array(9).fill(0).map(() => Array(9).fill(0).map(() => new Set()));
+    history = [];
+    mistakes = 0;
+    updateMistakesDisplay();
+    renderBoard();
+}
+
+// Generator Sudoku Sederhana & Efektif
+function generateSudoku() {
+    solutionGrid = Array(9).fill(0).map(() => Array(9).fill(0));
+    fillSudoku(0, 0);
+}
+
+function fillSudoku(row, col) {
+    if (col === 9) {
+        row++;
+        col = 0;
+        if (row === 9) return true;
+    }
+    
+    let nums = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+    for (let num of nums) {
+        if (isValid(solutionGrid, row, col, num)) {
+            solutionGrid[row][col] = num;
+            if (fillSudoku(row, col + 1)) return true;
+            solutionGrid[row][col] = 0;
+        }
+    }
+    return false;
+}
+
+function isValid(grid, r, c, num) {
+    for (let i = 0; i < 9; i++) {
+        if (grid[r][i] === num || grid[i][c] === num) return false;
+    }
+    let startRow = Math.floor(r / 3) * 3;
+    let startCol = Math.floor(c / 3) * 3;
+    for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+            if (grid[startRow + i][startCol + j] === num) return false;
+        }
+    }
+    return true;
+}
+
+function carveKills(clues) {
+    puzzleGrid = solutionGrid.map(row => [...row]);
+    let cellsToRemove = 81 - clues;
+    while (cellsToRemove > 0) {
+        let r = Math.floor(Math.random() * 9);
+        let c = Math.floor(Math.random() * 9);
+        if (puzzleGrid[r][c] !== 0) {
+            puzzleGrid[r][c] = 0;
+            cellsToRemove--;
+        }
+    }
+}
+
+function selectCell(r, c) {
+    selectedCell = [r, c];
+    renderBoard();
+}
+
+function handleInput(num) {
+    if (!selectedCell) return;
+    let [r, c] = selectedCell;
+    
+    if (puzzleGrid[r][c] !== 0) return; // Tidak bisa ubah angka bawaan
+    
+    let oldVal = userGrid[r][c];
+    let oldNotes = new Set(notesGrid[r][c]);
+
+    if (isNoteMode && num !== 0) {
+        if (notesGrid[r][c].has(num)) {
+            notesGrid[r][c].delete(num);
+        } else {
+            notesGrid[r][c].add(num);
+        }
+        history.push({ type: 'note', r, c, oldNotes, newNotes: new Set(notesGrid[r][c]) });
+    } else {
+        if (userGrid[r][c] === num) return;
+        
+        userGrid[r][c] = num;
+        notesGrid[r][c].clear(); // Hapus catatan jika angka diisi
+        
+        if (num !== 0 && num !== solutionGrid[r][c]) {
+            mistakes++;
+            updateMistakesDisplay();
+            if (mistakes >= 3) {
+                alert("Game Over! Terlalu banyak kesalahan.");
+                restartGame();
+            }
+        }
+        
+        history.push({ type: 'value', r, c, oldVal, newVal: num });
+        checkWinCondition();
+    }
+    renderBoard();
+}
+
+function undoMove() {
+    if (history.length === 0) return;
+    let last = history.pop();
+    if (last.type === 'value') {
+        userGrid[last.r][last.c] = last.oldVal;
+    } else if (last.type === 'note') {
+        notesGrid[last.r][last.c] = last.oldNotes;
+    }
+    renderBoard();
+}
+
+function toggleNoteMode() {
+    isNoteMode = !isNoteMode;
+    const btn = document.getElementById('btn-notes');
+    const status = document.getElementById('note-status');
+    btn.classList.toggle('active', isNoteMode);
+    status.textContent = isNoteMode ? 'ON' : 'OFF';
+}
+
+function giveHint() {
+    let emptyCells = [];
+    for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+            if (userGrid[r][c] !== solutionGrid[r][c]) {
+                emptyCells.push([r, c]);
+            }
+        }
+    }
+    if (emptyCells.length === 0) return;
+    let [r, c] = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    userGrid[r][c] = solutionGrid[r][c];
+    notesGrid[r][c].clear();
+    renderBoard();
+    checkWinCondition();
+}
+
+function renderBoard() {
+    const cells = document.querySelectorAll('.cell');
+    let selectedNum = selectedCell ? userGrid[selectedCell[0]][selectedCell[1]] : null;
+
+    cells.forEach(cell => {
+        let r = parseInt(cell.dataset.row);
+        let c = parseInt(cell.dataset.col);
+        let val = userGrid[r][c];
+        let isGiven = puzzleGrid[r][c] !== 0;
+
+        // Reset class
+        cell.className = 'cell';
+        if (isGiven) cell.classList.add('given');
+        
+        // Render angka utama
+        let textNode = cell.childNodes[0]; // Text node / value display
+        // Bersihkan teks lama selain catatan
+        cell.childNodes.forEach(child => {
+            if (child.nodeType === Node.TEXT_NODE) child.remove();
+        });
+        
+        if (val !== 0) {
+            cell.insertBefore(document.createTextNode(val), cell.firstChild);
+            if (!isGiven && val !== solutionGrid[r][c]) {
+                cell.classList.add('error');
+            }
+        }
+
+        // Render catatan kecil
+        let notesContainer = cell.querySelector('.cell-notes');
+        notesContainer.childNodes.forEach(span => {
+            let n = parseInt(span.dataset.note);
+            span.textContent = notesGrid[r][c].has(n) ? n : '';
+        });
+
+        // Highlight sel terpilih dan angka yang sama
+        if (selectedCell) {
+            let [sr, sc] = selectedCell;
+            if (r === sr && c === sc) {
+                cell.classList.add('selected');
+            } else if (r === sr || c === sc || (Math.floor(r/3) === Math.floor(sr/3) && Math.floor(c/3) === Math.floor(sc/3))) {
+                cell.classList.add('highlight');
+            }
+            if (selectedNum !== 0 && val === selectedNum) {
+                cell.classList.add('highlight');
+            }
+        }
+    });
+}
+
+function checkWinCondition() {
+    for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+            if (userGrid[r][c] !== solutionGrid[r][c]) return;
+        }
+    }
+    stopTimer();
+    document.getElementById('win-time').textContent = document.getElementById('timer').textContent;
+    document.getElementById('win-mistakes').textContent = mistakes;
+    document.getElementById('win-modal').classList.remove('hidden');
+}
+
+function updateMistakesDisplay() {
+    document.getElementById('mistakes').textContent = `${mistakes} / 3`;
+}
+
+function startTimer() {
+    timerSeconds = 0;
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        timerSeconds++;
+        let m = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+        let s = (timerSeconds % 60).toString().padStart(2, '0');
+        document.getElementById('timer').textContent = `${m}:${s}`;
+    }, 1000);
+}
+
+function stopTimer() {
+    clearInterval(timerInterval);
+}
+
+function resetTimer() {
+    stopTimer();
+    document.getElementById('timer').textContent = '00:00';
+}
+</script>
+</body>
+</html>
